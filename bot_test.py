@@ -1,0 +1,231 @@
+import re #подключение для обработки текста
+import telebot #импорт библиотеки @BotFather
+from telebot import types #отображение кнопок в тг-боте
+
+#конфигурация
+TOKEN = '7517088557:AAGhLn819gBRS0VJBKhCWIclpN7A1fexOws'
+ADMIN_IDS = [1434678001, 695150675] #подключение ID админов - Алина и Наталья
+
+bot = telebot.TeleBot(TOKEN)
+
+user_city = {} #выбранный город
+user_stage = {} #стадия пользователя
+pending_messages = {} #сохранение последнего сообщения от пользователя
+
+#команды - чтобы начать сначала и перезапустить диалог
+@bot.message_handler(commands=['start'])
+def start_command(message):
+    markup = types.InlineKeyboardMarkup(row_width=1) #создание клавиатуры, row_width=1 - одна кнопка в строке
+    markup.add(
+        types.InlineKeyboardButton("Офисные закупки", callback_data="office_supplies"),
+        types.InlineKeyboardButton("Смартвей", callback_data="smartway")
+    )
+    bot.send_message(
+        message.chat.id,
+        f'Привет, {message.from_user.first_name}! Меня зовут Винни, я — бот, призванный помочь с офис-закупками и рабочими поездками.\n\nВыбери нужный раздел:',
+        reply_markup=markup #привязываем к сообщению кнопки
+    )
+
+#ожидание заявки на возврат билета, отправка шаблона
+@bot.message_handler(commands=['smartway'])
+def biznes_travel(message): #message — объект, содержащий сообщение пользователя. Через него мы получаем ID чата, текст, имя пользователя.
+    chat_id = message.chat.id
+    user_stage[chat_id] = "waiting_smartway" #помечаем, что бот ждет смартвей-сообщение
+    send_smartway_template(chat_id)
+   
+#отправка шаблона для заявки на офисные закупки
+@bot.message_handler(commands=['order'])
+def order_template(message):
+    send_order_template(message.chat.id)
+
+#ссылки на интернет-магазины
+@bot.message_handler(commands=['site'])
+def show_links(message):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("📦 Комус", url="https://www.komus.ru"),
+        types.InlineKeyboardButton("🛒 ВсеИнструментыРу", url="https://www.vseinstrumenti.ru"),
+        types.InlineKeyboardButton("🔧 Чип и Дип", url="https://www.chipdip.ru"),
+        types.InlineKeyboardButton("💻 Ситилинк", url="https://www.citilink.ru")
+    )
+    bot.send_message(message.chat.id, "Выбери интернет-магазин:", reply_markup=markup)
+
+#список городов для выбора
+@bot.message_handler(commands=['city'])
+def choose_city(message):
+    send_city_buttons(message.chat.id)
+
+#вывод всех доступных команд
+@bot.message_handler(commands=['help'])
+def request_help(message):
+    help_text = (
+        'Напиши "Привет" или отправь запрос без приветствия одним сообщением и я сразу отправлю его менеджерам!\n\n'
+        '<b>Ты можешь управлять мной, посылая эти команды:</b>\n'
+        '• /start - вернуться к началу.\n'
+        '• /order - шаблон заказа.\n'
+        '• /city - выбрать город.\n'
+        '• /site - интернет-магазины: "комус", "инструменты", "техника", "запчасти".\n'
+        '• /smartway - шаблон для заявки на возврат или обмен билета.\n'
+    )
+    bot.send_message(message.chat.id, help_text, parse_mode="html")
+
+#шаблон заявки на закупку
+def send_order_template(chat_id):
+    bot.send_message(
+        chat_id,
+        f'<b>Шаблон для заявки:</b>\n'
+        f'"Привет! Прошу заказать <u><i>перечисление</i></u> для <u><i>указание причины</i></u>.\n'
+        f'Ссылка: <u><i>при необходимости</i></u>\n\n'
+        f'👺<b>Пожалуйста, отправь заявку одним сообщением!</b>👺',
+        parse_mode="html"
+    )
+
+#шаблон смартвея
+def send_smartway_template(chat_id):
+    bot.send_message(
+        chat_id,
+        '<b>Опиши ситуацию по шаблону ниже:</b>\n'
+        '• ФИО;\n'
+        '• Причина обмена или сдачи билета;\n'
+        '• Время, город отправления и прибытия;\n'
+        '• Имеется багаж? - "Да/нет";\n'
+        '• Необходимо поменять или предупредить об изменениях гостиницу/отель? - "Да/Нет";\n'
+        '• Поставлен ли в известность твой непосредственный руководитель? - "Да/Нет".\n\n'
+        '👺<b>Пожалуйста, отправь заявку одним сообщением!</b>👺',
+        parse_mode="html"
+    )
+
+#показывает кнопки с городами
+def send_city_buttons(chat_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("Москва", callback_data="city_msk"),
+        types.InlineKeyboardButton("Санкт-Петербург", callback_data="city_spb"),
+        types.InlineKeyboardButton("Самара", callback_data="city_samara"),
+        types.InlineKeyboardButton("Новосибирск", callback_data="city_nsk")
+    )
+    bot.send_message(chat_id, "Выбери город:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callbacks(call):
+    bot.answer_callback_query(call.id)
+    chat_id = call.message.chat.id
+    
+    #запоминает, что пользователь будет делать заказ, показывает города
+    if call.data == "office_supplies":
+        user_stage[chat_id] = "waiting_message"
+        send_city_buttons(chat_id)
+        
+    #если пользователь отправил сообщение - оно отправляется админам, если нет - шаблон и ждет сообщение
+    elif call.data == "smartway":
+        original_message = pending_messages.pop(chat_id, None)
+        if original_message:
+            for admin_id in ADMIN_IDS:
+                bot.send_message(
+                    admin_id,
+                    f"<b>✈️ Smartway-заявка</b> от @{call.from_user.username or call.from_user.first_name}:\n{original_message}",
+                    parse_mode="html"
+                )
+            bot.send_message(chat_id, "Спасибо! Мы постараемся обработать заявку как можно скорее.")
+        else:
+            send_smartway_template(chat_id)
+            user_stage[chat_id] = "waiting_smartway"
+
+    #сохраняет выбранный город, если есть сообщение - отправляет админам, если нет - отправляет шаблон
+    elif call.data.startswith("city_"):
+        city_map = {
+            "city_msk": "Москва",
+            "city_spb": "Санкт-Петербург",
+            "city_samara": "Самара",
+            "city_nsk": "Новосибирск"
+        }
+        city = city_map.get(call.data)
+        user_city[chat_id] = city
+
+        if chat_id in pending_messages:
+            original_message = pending_messages.pop(chat_id)
+            for admin_id in ADMIN_IDS:
+                bot.send_message(
+                    admin_id,
+                    f"<b>💵 Заявка на закупку</b> от @{call.from_user.username or call.from_user.first_name}:\nГород: {city}\nСообщение: {original_message}", parse_mode="html"
+                )
+            bot.send_message(chat_id, "Спасибо! Твоё сообщение получено.")
+        else:
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("Выбрать другой город", callback_data="change_city"))
+            bot.send_message(chat_id, f"Спасибо! Ты выбрал: {city}. Теперь отправь заявку одним сообщением — шаблон можно вызвать командой /order.", reply_markup=markup)
+            user_stage[chat_id] = "waiting_office_order"
+
+    #показывает список городов заново
+    elif call.data == "change_city":
+        send_city_buttons(chat_id)
+
+#обработка любых сообщений
+@bot.message_handler(func=lambda m: True)
+def handle_text_messages(message):
+    chat_id = message.chat.id
+    text = message.text.strip().lower()
+
+    #отправляет смарт-заявку админам
+    if user_stage.get(chat_id) == "waiting_smartway":
+        for admin_id in ADMIN_IDS:
+            bot.send_message(
+                admin_id,
+                f"<b>✈️ Smartway-заявка</b> от @{message.from_user.username or message.from_user.first_name}:\n{message.text}",
+                parse_mode="html"
+            )
+        bot.send_message(chat_id, "Спасибо! Мы постараемся обработать заявку как можно скорее.")
+        user_stage.pop(chat_id, None)
+        return
+    
+    #если пользователь пишет привет - старт
+    if re.fullmatch(r"привет[!.,…]*", text):
+        user_stage[chat_id] = "waiting_message"
+        start_command(message)
+        return
+    
+    #вызов ссылок в ответ на сообщения от пользователя
+    quick_links = {
+        "комус": "https://www.komus.ru",
+        "инструменты": "https://www.vseinstrumenti.ru",
+        "запчасти": "https://www.chipdip.ru",
+        "техника": "https://www.citilink.ru"
+    }
+    if text in quick_links:
+        bot.send_message(chat_id, quick_links[text], disable_web_page_preview=True)
+        return
+
+    if re.fullmatch(r"спа+си+бо+|спс|спасиб+|о+т+л+и+ч+н+о+|су+п+е+р+|к+л+а+с+с+|х+о+р+о+ш+о", text):
+        bot.send_message(chat_id, f"Рад помочь, {message.from_user.first_name}!")
+        return
+
+    #если город не выбран - сохраняет сообщение - кнопки - сохранение
+    city = user_city.get(chat_id)
+    if not city:
+        pending_messages[chat_id] = message.text
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("Офисные закупки", callback_data="office_supplies"),
+            types.InlineKeyboardButton("Смартвей", callback_data="smartway")
+        )
+        bot.send_message(chat_id, "Выбери нужный раздел, чтобы продолжить:", reply_markup=markup)
+        user_stage[chat_id] = "waiting_section"
+        return
+    
+    #офисная заявка - отправляет админам, пишет пользователю
+    if user_stage.get(chat_id) == "waiting_office_order":
+        for admin_id in ADMIN_IDS:
+            bot.send_message(
+                admin_id,
+                f"<b>💵 Заявка на закупку</b> @{message.from_user.username or message.from_user.first_name}:\nГород: {city}\nСообщение: {message.text}", parse_mode="html"
+            )
+        bot.send_message(chat_id, "Сообщение получено. Мы обработаем его в течение трёх рабочих дней. Жду тебя ещё!")
+
+    #сброс состояния
+    user_stage.pop(chat_id, None)
+    user_city.pop(chat_id, None)
+
+#бесконечный цикл
+if __name__ == '__main__':
+    print("Бот запущен...")
+    bot.polling(none_stop=True)
